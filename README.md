@@ -7,9 +7,12 @@
  * Arduino development environment
  * WiFi internet network available
  
- ## How to use it
+ ## How to use AION
 
 1. Connect the LED matrix to the NodeMCU board as described in the image below.
+
+
+![Diagram showing how to connect the LED matrix to the NodeMCU development board](https://github.com/nighthawk017/AION/blob/main/resources/diagram.png)
 
 2. Upload the code to the NodeMCU development board via Arduino IDE.
 3 Once the code is uploaded on the board, connect via wifi to the board 192.168.4.4 . The instructions are also displayed on the LED matrix. 
