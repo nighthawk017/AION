@@ -1,2 +1,19 @@
 # AION
- Arduino day counter using an ESP nodemcu and a LED matrix
+ Arduino day counter using an ESP nodemcu and a LED matrix.
+ 
+ ## Prerequisites
+ * NodeMCU V3 development board
+ * MAX7219 dot LED matrix 8x32 
+ * Arduino development environment
+ * WiFi internet network available
+ 
+ ## How to use it
+
+1. Connect the LED matrix to the NodeMCU board as described in the image below.
+
+2. Upload the code to the NodeMCU development board via Arduino IDE.
+3 Once the code is uploaded on the board, connect via wifi to the board 192.168.4.4 . The instructions are also displayed on the LED matrix. 
+
+Please note thatThe program will wait 3 minutes for the user to connect to the the board via wifi, before trying to automatically connect to the internet. The user can restart the state by pressing reset.
+
+4. Once connected to the board, fill in the credentials to the wifi used to connect to internet, and the desired date to which AION should countdown.
