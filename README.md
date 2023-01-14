@@ -19,4 +19,5 @@
 
 Please note thatThe program will wait 3 minutes for the user to connect to the the board via wifi, before trying to automatically connect to the internet. The user can restart the state by pressing reset.
 
-4. Once connected to the board, fill in the credentials to the wifi used to connect to internet, and the desired date to which AION should countdown.
+4. Once connected to the board, fill in the credentials to the wifi used to connect to internet, and the desired date to which AION should countdown, then click Save. 
+5. AION will now use the WiFi credentials provided to connect to the internet and start counting down the days until target date.
