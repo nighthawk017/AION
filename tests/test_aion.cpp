@@ -92,6 +92,19 @@ static void resetState() {
     configTzTime(TIMEZONE, "pool.ntp.org");
 }
 
+// Unix time of the given UTC date and time
+static time_t utc(int year, int month, int day, int hour = 0, int minute = 0) {
+    return (time_t)daysFromCivil(year, month, day) * 86400 + hour * 3600 + minute * 60;
+}
+
+// days remaining at "now" for a target date (stored, like the page sends it, as UTC midnight)
+static long daysUntil(time_t now, int year, int month, int day) {
+    g_now = now;
+    eventTime = utc(year, month, day);
+    updateRemainingDays();
+    return daysRemaining;
+}
+
 // ---------- harness ----------
 
 static void test_setup_starts_access_point_in_config_mode() {
@@ -179,6 +192,84 @@ static void test_eeprom_data_without_marker_is_ignored() {
     ASSERT_TRUE(ssid == SSID_DEFAULT_VALUE);
 }
 
+// ---------- day calculation (timezone CET/CEST) ----------
+
+static void test_days_from_civil_known_dates() {
+    ASSERT_EQ(daysFromCivil(1970, 1, 1), 0);
+    ASSERT_EQ(daysFromCivil(2000, 3, 1), 11017);
+    ASSERT_EQ(daysFromCivil(2038, 1, 19), 24855);
+    ASSERT_EQ(daysFromCivil(1969, 12, 31), -1);
+}
+
+static void test_days_tomorrow_today_yesterday() {
+    time_t now = utc(2026, 6, 15, 10);
+    ASSERT_EQ(daysUntil(now, 2026, 6, 16), 1);
+    ASSERT_EQ(daysUntil(now, 2026, 6, 15), 0);
+    ASSERT_EQ(daysUntil(now, 2026, 6, 14), -1);
+}
+
+static void test_days_100_days_ahead() {
+    ASSERT_EQ(daysUntil(utc(2026, 6, 15, 10), 2026, 9, 23), 100);
+}
+
+static void test_days_past_2038() {
+    ASSERT_EQ(daysUntil(utc(2026, 6, 15, 10), 2040, 1, 1), 4948);
+}
+
+static void test_days_change_at_local_midnight_not_utc() {
+    // 23:30 CEST on Jul 10 is still Jul 10, 00:30 CEST on Jul 11 is already Jul 11 (both are Jul 10 in UTC)
+    ASSERT_EQ(daysUntil(utc(2026, 7, 10, 21, 30), 2026, 7, 11), 1);
+    ASSERT_EQ(daysUntil(utc(2026, 7, 10, 22, 30), 2026, 7, 11), 0);
+    // winter: CET is UTC+1
+    ASSERT_EQ(daysUntil(utc(2026, 1, 10, 23, 30), 2026, 1, 11), 0);
+}
+
+static void test_days_across_spring_dst_change() {
+    // DST starts on 2026-03-29, a 23-hour day
+    ASSERT_EQ(daysUntil(utc(2026, 3, 28, 23, 30), 2026, 3, 30), 1);
+    ASSERT_EQ(daysUntil(utc(2026, 3, 29, 22, 30), 2026, 3, 30), 0);
+    ASSERT_EQ(daysUntil(utc(2026, 3, 27, 12), 2026, 4, 3), 7);
+}
+
+static void test_days_across_autumn_dst_change() {
+    // DST ends on 2026-10-25, a 25-hour day
+    ASSERT_EQ(daysUntil(utc(2026, 10, 24, 22, 30), 2026, 10, 26), 1);
+    ASSERT_EQ(daysUntil(utc(2026, 10, 25, 23, 30), 2026, 10, 26), 0);
+    ASSERT_EQ(daysUntil(utc(2026, 10, 23, 12), 2026, 10, 30), 7);
+}
+
+static void test_days_syncing_until_ntp_sets_the_clock() {
+    state = COUNTDOWN;
+    WiFi.currentStatus = WL_CONNECTED;
+    eventTime = utc(2026, 6, 16);
+    g_now = 0;
+    loop();
+    ASSERT_STR_EQ(P.shown(), "Syncing time...");
+    ASSERT_FALSE(daysRemainingValid);
+    // NTP synced
+    g_now = utc(2026, 6, 15, 10);
+    loop();
+    ASSERT_STR_EQ(P.shown(), "1");
+    ASSERT_EQ(P.effectIn, PA_PRINT);
+}
+
+static void test_days_recomputed_every_update_interval() {
+    state = COUNTDOWN;
+    WiFi.currentStatus = WL_CONNECTED;
+    eventTime = utc(2026, 6, 16);
+    g_now = utc(2026, 6, 15, 21, 59);
+    loop();
+    ASSERT_STR_EQ(P.shown(), "1");
+    // local midnight passes, but the count only updates after DAYS_UPDATE_INTERVAL
+    g_now = utc(2026, 6, 15, 22, 0);
+    g_millis += DAYS_UPDATE_INTERVAL - 1;
+    loop();
+    ASSERT_STR_EQ(P.shown(), "1");
+    g_millis += 1;
+    loop();
+    ASSERT_STR_EQ(P.shown(), "0");
+}
+
 int main() {
     printf("harness\n");
     RUN(test_setup_starts_access_point_in_config_mode);
@@ -193,6 +284,17 @@ int main() {
     RUN(test_eeprom_saved_config_is_loaded_on_boot);
     RUN(test_eeprom_blank_reads_as_not_configured);
     RUN(test_eeprom_data_without_marker_is_ignored);
+
+    printf("day calculation\n");
+    RUN(test_days_from_civil_known_dates);
+    RUN(test_days_tomorrow_today_yesterday);
+    RUN(test_days_100_days_ahead);
+    RUN(test_days_past_2038);
+    RUN(test_days_change_at_local_midnight_not_utc);
+    RUN(test_days_across_spring_dst_change);
+    RUN(test_days_across_autumn_dst_change);
+    RUN(test_days_syncing_until_ntp_sets_the_clock);
+    RUN(test_days_recomputed_every_update_interval);
 
     printf("\n%d tests, %d failures\n", g_tests_run, g_tests_failed);
     return g_tests_failed == 0 ? 0 : 1;
