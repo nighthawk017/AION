@@ -57,3 +57,37 @@ Before uploading, you may want to change these settings at the top of `aion.ino`
 | A number, e.g. `42` | Days left until the target date: `1` the day before, `0` on the day. After the target date the number goes negative (`-1`, `-2`, ...). |
 
 If the WiFi connection drops while counting down, AION keeps counting and reconnects by itself.
+
+## Run in the Wokwi simulator
+
+Wokwi can't simulate the ESP8266, so the simulator runs an ESP32 build of the same sketch. In that build AION joins Wokwi's `Wokwi-GUEST` network instead of opening `DATE_TIMER`, and ignores the WiFi name and password typed into the form. [wokwi.toml](wokwi.toml) and [diagram.json](diagram.json) hold the simulator setup.
+
+1. Install [arduino-cli](https://arduino.github.io/arduino-cli/), the ESP32 core and the libraries:
+   ```
+   arduino-cli core install esp32:esp32
+   arduino-cli lib install MD_Parola MD_MAX72XX
+   ```
+2. Compile the ESP32 build (the symlink gives the sketch a folder with its own name):
+   ```
+   mkdir -p build/sketch/aion && ln -sf ../../../aion.ino build/sketch/aion/aion.ino
+   arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir build/esp32.esp32.esp32 build/sketch/aion
+   ```
+3. In VS Code with the "Wokwi for VS Code" extension, press `F1` and run **Wokwi: Start Simulator**.
+4. Open http://localhost:8180 for the settings page. The matrix still shows the `192.168.4.4` instructions of the real board.
+
+## Tests
+
+The tests run on your computer, without a board or the Arduino tools; they only need `make` and a C++ compiler:
+```
+make -C tests test
+```
+They compile `aion.ino` against stand-ins for the Arduino libraries (`tests/mocks.h`) and check the settings storage, the day count, the settings form handler and the switching between modes. GitHub Actions runs them on every push, and also compiles the sketch for the NodeMCU and the ESP32.
+
+## Known limitations
+
+* 2.4 GHz WiFi networks only (the ESP8266 has no 5 GHz radio).
+* The timezone is set when compiling (`TIMEZONE` in `aion.ino`); the day count changes at midnight in that timezone.
+* To change the settings, reset the board and connect to `DATE_TIMER` within 3 minutes. While counting down, the settings page is not reachable.
+* After a failed connection AION does not retry by itself; submit the form again or reset the board.
+* While AION connects to your WiFi (up to about 100 seconds), the display stops updating.
+* The settings page is plain HTTP on the board's own network, protected only by the `DATE_TIMER` password.
