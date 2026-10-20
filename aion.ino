@@ -103,8 +103,12 @@ time_t currentTime;
 //Central European Time; e.g. "EET-2EEST,M3.5.0/3,M10.5.0/4" for Eastern Europe or "GMT0BST,M3.5.0/1,M10.5.0" for the UK
 const char* TIMEZONE = "CET-1CEST,M3.5.0,M10.5.0/3";
 
-//when the target event takes place (it can be programmed when connecting to the board via wifi)
-long int eventTime = 1632528000;
+//when the target event takes place (it can be programmed when connecting to the board via wifi).
+//A 32-bit time would stop at 2038-01-19; both cores use a 64-bit time_t
+static_assert(sizeof(time_t) >= 8, "time_t must be 64-bit to hold dates past 2038");
+time_t eventTime = 1632528000;
+//latest accepted target date (9999-12-31 23:59:59 UTC), so gmtime_r() always gets a representable date
+const time_t MAX_EVENT_TIME = 253402300799LL;
 //number of days remaining until the target event
 long int daysRemaining = 0;
 //false until daysRemaining has been computed in the current countdown (reset on every connect)
@@ -162,7 +166,7 @@ void setup() {
     char buf[EVENT_TIME_SIZE];
     char *eptr;
     readFromEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE).toCharArray(buf, EVENT_TIME_SIZE);
-    eventTime = strtol(buf , &eptr, 10);
+    eventTime = strtoll(buf , &eptr, 10);
 
     PRINTLN("EEPROM eventvalue value: ");
     PRINTLN(eventTime);
@@ -324,12 +328,12 @@ void handleRoot() {
 void handleSave() {
   // validate everything before saving anything, so a bad request leaves the stored values unchanged
   // (an empty date picker used to send "NaN", which was stored and parsed as 1970)
-  long int newEventTime = 0;
+  time_t newEventTime = 0;
   String eventTimeArg = server.arg("eventTime");
   if (eventTimeArg != "") {
     char *eptr;
-    newEventTime = strtol(eventTimeArg.c_str(), &eptr, 10);
-    if (*eptr != '\0' || newEventTime <= 0) {
+    newEventTime = strtoll(eventTimeArg.c_str(), &eptr, 10);
+    if (*eptr != '\0' || newEventTime <= 0 || newEventTime > MAX_EVENT_TIME) {
       server.send(400, "text/plain", "Invalid target date, nothing was saved.");
       return;
     }
@@ -536,9 +540,8 @@ void updateRemainingDays() {
   localtime_r(&currentTime, &now);
   long int today = daysFromCivil(now.tm_year + 1900, now.tm_mon + 1, now.tm_mday);
   // the date picker sends UTC midnight of the chosen date, so the target date is eventTime's UTC date
-  time_t eventTimestamp = eventTime;
   struct tm event;
-  gmtime_r(&eventTimestamp, &event);
+  gmtime_r(&eventTime, &event);
   long int eventDay = daysFromCivil(event.tm_year + 1900, event.tm_mon + 1, event.tm_mday);
   daysRemaining = eventDay - today;
   PRINTLN(ctime(&currentTime));
