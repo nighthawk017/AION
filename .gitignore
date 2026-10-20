@@ -4,3 +4,6 @@ build/
 # Local notes
 stories.md
 CLAUDE.md
+
+# Host test binary
+tests/test_aion
