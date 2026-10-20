@@ -412,10 +412,12 @@ String readFromEeprom(int startingAddress, int size) {
   for (int i = 0; i < size; i++) {
     char currentChar;
     currentChar = EEPROM.read(startingAddress + i);
-    result = result + currentChar;
+    //stop before appending the terminator, otherwise the String keeps an embedded NUL and its
+    //length and == comparisons (e.g. against the default credentials) are off
     if(currentChar == '\0') {
       break;
     }
+    result = result + currentChar;
   }
   PRINTLN(result);
   return result;
