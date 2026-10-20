@@ -1,3 +1,20 @@
+/*
+ * AION - day counter
+ *
+ * Shows on a MAX7219 8x32 LED matrix (4 chained FC16 modules) the number of days left until a target date.
+ * On boot the board opens the DATE_TIMER WiFi access point and serves a config page at http://192.168.4.4,
+ * where the WiFi credentials and the target date are set. It then joins that network, gets the time over
+ * NTP and counts down. Settings are kept in EEPROM, so after a restart it reconnects on its own after 3 minutes.
+ *
+ * Board: NodeMCU V3 (ESP8266), "NodeMCU 1.0 (ESP-12E Module)" in the Arduino IDE.
+ * An ESP32 build of the same sketch runs in the Wokwi simulator (see wokwi.toml and diagram.json).
+ *
+ * Libraries: MD_Parola, MD_MAX72XX (WiFi, web server, EEPROM, SPI and time come with the board core).
+ *
+ * Wiring (NodeMCU -> matrix): D5 -> CLK, D7 -> DIN, D8 -> CS, 3V -> VCC, G -> GND.
+ * See resources/diagram.png.
+ */
+
 // ESP32 builds are only used for the Wokwi simulator (Wokwi has no ESP8266); the real board is an ESP8266 NodeMCU
 #if defined(ESP32)
 #define WOKWI_SIMULATION 1
