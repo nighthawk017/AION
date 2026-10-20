@@ -255,11 +255,12 @@ void handleRoot() {
         function handleSaveClick(){\
           ssid = document.getElementById('ssid').value;\
           var password = document.getElementById('password').value;\
-          var eventTime = document.getElementById('target-date').valueAsNumber / 1000;\
-          fetch('/save?ssid=' + ssid + '&password=' + password + '&eventTime=' + eventTime) \
-            .then(response => { \
-              if(response.status === 200) response.text().then(text => alert(text)); \
-              else alert(\"failed\");}); \
+          var url = '/save?ssid=' + ssid + '&password=' + password;\
+          var targetDate = document.getElementById('target-date').valueAsNumber;\
+          if (!isNaN(targetDate)) url += '&eventTime=' + targetDate / 1000;\
+          fetch(url) \
+            .then(response => response.text().then(text => alert(text))) \
+            .catch(() => alert(\"failed\")); \
         };\
       </script>\
     </body>\
@@ -272,6 +273,19 @@ void handleRoot() {
 // It only requests the wifi connection: loop() connects after the response is sent, because
 // connecting shuts down the access point the browser is using
 void handleSave() {
+  // validate everything before saving anything, so a bad request leaves the stored values unchanged
+  // (an empty date picker used to send "NaN", which was stored and parsed as 1970)
+  long int newEventTime = 0;
+  String eventTimeArg = server.arg("eventTime");
+  if (eventTimeArg != "") {
+    char *eptr;
+    newEventTime = strtol(eventTimeArg.c_str(), &eptr, 10);
+    if (*eptr != '\0' || newEventTime <= 0) {
+      server.send(400, "text/plain", "Invalid target date, nothing was saved.");
+      return;
+    }
+  }
+
   if (server.arg("ssid") != "") {
     PRINTLN("ssid: " + server.arg("ssid"));
     writeToEeprom(0, server.arg("ssid"));
@@ -284,11 +298,8 @@ void handleSave() {
   }
   if (server.arg("eventTime") != "") {
     PRINTLN("eventTime: " + server.arg("eventTime"));
-    char buf[32];
-    char *eptr;
-    server.arg("eventTime").toCharArray(buf, 32);
     writeToEeprom(2*MAX_FIELD_LENGTH, server.arg("eventTime"));
-    eventTime = strtol(buf , &eptr, 10);
+    eventTime = newEventTime;
   }
   server.send(200, "text/plain", "Saved. AION is now connecting to the WiFi network and this access point will close. "
     "On success the LED matrix shows the days remaining. On failure it shows an error and the DATE_TIMER access point comes back so you can resubmit.");
