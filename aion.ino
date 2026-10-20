@@ -55,7 +55,7 @@ MD_Parola P = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 // pause time in ms for led matrix
 #define PAUSE_TIME  3000
 
-// Turn on debug statements to the serial output (set it to 1 to turn on debug, and set it to 0 to turn of debug)
+// Turn on debug statements to the serial output (set it to 1 to turn on debug, and set it to 0 to turn off debug)
 #define  DEBUG  0
 
 #if  DEBUG
@@ -70,8 +70,8 @@ MD_Parola P = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 // text effect used for led matrix text (currently using scroll left effect)
 textEffect_t  effect = PA_SCROLL_LEFT;
 
-//variable containing the text displayed on the led matrix. It is initialez with the text desplayed before esp is set up
-char screenText[128] = "Connect DATE TIMER WiFi access point, then access 192.168.4.4 in your browser.";
+//buffer holding the text shown on the led matrix; displayText()/displayNumber() fill it and Parola reads it while animating
+char screenText[128] = "";
 
 //default wifi credentials
 String SSID_DEFAULT_VALUE = "default-wifi-network";
@@ -86,10 +86,10 @@ String ssid = SSID_DEFAULT_VALUE;
 const char* AP_SSID = "DATE_TIMER";
 const char* AP_PASSWORD = "password";
 
-//server port
+//web server for the config page, on port 80
 ESP8266WebServer server (80);
 
-// 
+//buffer for the config page html built by handleRoot()
 char htmlResponse[3000];
 
 //timeout time before the board tries to automatically connect to wifi (using the data saved in eeprom)
@@ -294,7 +294,7 @@ void initAccessPoint() {
 }
 #endif
 
-//initializez webserver, sets the handlers & starts the web server
+//initializes the webserver, sets the handlers & starts the web server
 void initWebServer() {
   server.on ( "/", handleRoot );
   // POST keeps the credentials out of the URL (browser history, logs)
@@ -346,7 +346,7 @@ void handleRoot() {
 //   password  - wifi password, at most PASSWORD_SIZE - 1 characters
 //   eventTime - target date as a Unix timestamp in seconds, 1 to MAX_EVENT_TIME (the page sends UTC midnight of the chosen date)
 // Replies 400 with nothing saved if a value is invalid, otherwise 200.
-// The handler used to process the form input proided by the user and save the data to eeprom.
+// The handler used to process the form input provided by the user and save the data to eeprom.
 // It only requests the wifi connection: loop() connects after the response is sent, because
 // connecting shuts down the access point the browser is using
 void handleSave() {
@@ -503,8 +503,7 @@ void displayNumber(long int number) {
       sprintf(screenText, "%ld", number); 
       // Set the display for the next string. 
       P.setTextBuffer(screenText);
-      // When we have gone back to the first string, set a new exit effect
-      // and when we have done all those set a new entry effect.
+      // print the number in place, and keep it on screen for 60 s before the animation counts as finished
       P.setTextEffect(PA_PRINT, PA_PRINT);
       P.setPause(60000);
       // Tell Parola we have a new animation
@@ -513,6 +512,7 @@ void displayNumber(long int number) {
   
 }
 
+//scrolls the text. New text is only loaded once the current animation has finished, so call it every loop()
 void displayText(const char* text) {
   if (P.displayAnimate()) // animates and returns true when an animation is completed
   {
@@ -520,8 +520,7 @@ void displayText(const char* text) {
       sprintf(screenText, "%s", text); 
       // Set the display for the next string. 
       P.setTextBuffer(screenText);
-      // When we have gone back to the first string, set a new exit effect
-      // and when we have done all those set a new entry effect.
+      // scroll the text in and out
       P.setTextEffect(effect, effect);
       // displayNumber() sets a 60 s pause
       P.setPause(PAUSE_TIME);
