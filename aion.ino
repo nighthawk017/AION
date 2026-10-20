@@ -97,6 +97,11 @@ const unsigned long STARTUP_TIMEOUT = 180000;
 
 //eeprom layout: each value is stored as a null-terminated string in a fixed slot, so a slot
 //holds at most SIZE - 1 characters. The sizes follow the WiFi limits (SSID 32 bytes, WPA2 password 63 characters)
+//  offset  size  content
+//       0    33  wifi ssid
+//      33    64  wifi password
+//      97    32  target date, a Unix timestamp in seconds written as a decimal string (e.g. "1632528000")
+//     129     1  CONFIG_MARKER
 const int EEPROM_SIZE = 512;
 const int SSID_ADDR = 0;
 const int SSID_SIZE = 33;
@@ -130,6 +135,13 @@ const unsigned long DAYS_UPDATE_INTERVAL = 10000;
 //time(nullptr) stays near 1970 until NTP has synced; any later time means the clock is set (2020-01-01)
 const time_t TIME_SYNCED_AFTER = 1577836800;
 
+//what loop() does:
+// CONFIG         - after boot. Runs the DATE_TIMER access point, serves the config page and scrolls the connect
+//                  instructions. Goes to COUNTDOWN (or CONNECT_FAILED) when /save is submitted, or on its own after
+//                  STARTUP_TIMEOUT if EEPROM holds non-default credentials
+// COUNTDOWN      - connected to wifi; shows the days remaining once NTP has synced. Reconnects when the connection drops
+// CONNECT_FAILED - connectToWifi() gave up; the access point is back and the matrix asks to resubmit the form.
+//                  A new /save tries again (there is no automatic retry)
 enum State { CONFIG, COUNTDOWN, CONNECT_FAILED };
 State state = CONFIG;
 
@@ -329,6 +341,11 @@ void handleRoot() {
   server.send ( 200, "text/html", htmlResponse );
 }
 
+// POST /save with a urlencoded body (all fields optional, an empty or missing field keeps the current value):
+//   ssid      - wifi network name, at most SSID_SIZE - 1 bytes
+//   password  - wifi password, at most PASSWORD_SIZE - 1 characters
+//   eventTime - target date as a Unix timestamp in seconds, 1 to MAX_EVENT_TIME (the page sends UTC midnight of the chosen date)
+// Replies 400 with nothing saved if a value is invalid, otherwise 200.
 // The handler used to process the form input proided by the user and save the data to eeprom.
 // It only requests the wifi connection: loop() connects after the response is sent, because
 // connecting shuts down the access point the browser is using
