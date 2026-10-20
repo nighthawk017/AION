@@ -118,6 +118,10 @@ const time_t TIME_SYNCED_AFTER = 1577836800;
 //internal state
 int state = 0;
 
+//how often the wifi connection is checked while counting down, and when it was last checked
+const unsigned long CONNECTION_CHECK_INTERVAL = 30000;
+unsigned long connectionCheckedAt = 0;
+
 //set by the /save handler; loop() connects to wifi once the http response had time to reach the browser
 bool connectRequested = false;
 unsigned long connectRequestedAt = 0;
@@ -175,6 +179,7 @@ void loop() {
   unsigned long numberOfMilis = millis();
   
   if (state == 1) {
+    checkConnection(numberOfMilis);
     // before NTP has synced the computed days would be based on 1970
     if (time(nullptr) < TIME_SYNCED_AFTER) {
       displayText("Syncing time...");
@@ -354,8 +359,18 @@ void handleSave() {
   connectRequestedAt = millis();
 }
 
-void checkConnection() {
-  //TODO check if connection to wifi is established, if not, return to AP state to update logic
+//called from loop() in state 1: restarts the connection when it dropped (e.g. after a router restart).
+//WiFi.reconnect() does not block, so the countdown keeps running from the system clock meanwhile,
+//and SNTP resyncs on its own once the connection is back
+void checkConnection(unsigned long now) {
+  if (now - connectionCheckedAt < CONNECTION_CHECK_INTERVAL) {
+    return;
+  }
+  connectionCheckedAt = now;
+  if (WiFi.status() != WL_CONNECTED) {
+    PRINTLN("WiFi connection lost, reconnecting");
+    WiFi.reconnect();
+  }
 }
 
 //connects to wifi and changes the internal state to 1 (display counter to target date).
@@ -386,6 +401,9 @@ int connectToWifi() {
       retriesCount++;
     }    
   }
+  // checkConnection() takes over from here
+  WiFi.setAutoReconnect(true);
+  connectionCheckedAt = millis();
   state = 1;
   daysRemainingValid = false;
   return 0;
