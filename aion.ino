@@ -69,6 +69,11 @@ String PASSWORD_DEFAULT_VALUE = "default-wifi-password";
 String password = PASSWORD_DEFAULT_VALUE; 
 String ssid = SSID_DEFAULT_VALUE; 
 
+//access point the config page is served on. Anyone who knows the AP password can change the board's
+//wifi credentials and target date, so change it before flashing (WPA2 needs 8 to 63 characters)
+const char* AP_SSID = "DATE_TIMER";
+const char* AP_PASSWORD = "password";
+
 //server port
 ESP8266WebServer server (80);
 
@@ -144,9 +149,8 @@ void setup() {
     PRINT("EEPROM ssid value: ");
     PRINTLN(ssid);
 
+    //the password is never printed, not even in debug builds
     password = readFromEeprom(PASSWORD_ADDR, PASSWORD_SIZE);
-    PRINT("EEPROM password value: ");
-    PRINTLN(password);
 
     char buf[EVENT_TIME_SIZE];
     char *eptr;
@@ -205,7 +209,6 @@ void loop() {
     }
     else if (state == 0 && ((numberOfMilis) > STARTUP_TIMEOUT)) {
       PRINTLN(ssid);
-      PRINTLN(password);
       if(ssid != SSID_DEFAULT_VALUE || password != PASSWORD_DEFAULT_VALUE ) {
         // connectToWifi() sets the state to 1 on success and 2 on failure
         if(connectToWifi() == 0) {
@@ -248,7 +251,7 @@ void initAccessPoint() {
   IPAddress subnet(255, 255, 255, 0);
   WiFi.softAPConfig(local_ip, gateway, subnet);
   // Remove the password parameter, if you want the AP (Access Point) to be open
-  WiFi.softAP("DATE_TIMER", "password"); //TODO  extract variables outside
+  WiFi.softAP(AP_SSID, AP_PASSWORD);
   delay(100);
 
   IPAddress IP = WiFi.softAPIP();
@@ -263,7 +266,8 @@ void initAccessPoint() {
 //initializez webserver, sets the handlers & starts the web server
 void initWebServer() {
   server.on ( "/", handleRoot );
-  server.on ("/save", handleSave);
+  // POST keeps the credentials out of the URL (browser history, logs)
+  server.on ("/save", HTTP_POST, handleSave);
 
   server.begin();
   PRINTLN( "HTTP server started" );
@@ -281,7 +285,7 @@ void handleRoot() {
             <h1>ssid</h1>\
             <input type='text' name='ssid' id='ssid' size=64 autofocus>  \
             <h1>password</h1>\
-            <input type='text' name='password' id='password' size=64 autofocus>  \
+            <input type='password' name='password' id='password' size=64>  \
             <h1>Timer target date</h1>\
             <input type='date' id='target-date'> \
             <div>\
@@ -292,10 +296,10 @@ void handleRoot() {
         function handleSaveClick(){\
           ssid = document.getElementById('ssid').value;\
           var password = document.getElementById('password').value;\
-          var url = '/save?ssid=' + encodeURIComponent(ssid) + '&password=' + encodeURIComponent(password);\
+          var body = new URLSearchParams({ssid: ssid, password: password});\
           var targetDate = document.getElementById('target-date').valueAsNumber;\
-          if (!isNaN(targetDate)) url += '&eventTime=' + encodeURIComponent(targetDate / 1000);\
-          fetch(url) \
+          if (!isNaN(targetDate)) body.append('eventTime', targetDate / 1000);\
+          fetch('/save', {method: 'POST', body: body}) \
             .then(response => response.text().then(text => alert(text))) \
             .catch(() => alert(\"failed\")); \
         };\
@@ -337,7 +341,6 @@ void handleSave() {
     ssid = server.arg("ssid");
   }
   if (server.arg("password") != "") {
-    PRINTLN("password: " + server.arg("password"));
     password = server.arg("password");
   }
   if (server.arg("eventTime") != "") {
@@ -362,7 +365,6 @@ int connectToWifi() {
   WiFi.mode(WIFI_STA);
   PRINTLN("\nConnecting to WiFi");
   PRINTLN(ssid);
-  PRINTLN(password);
 #if WOKWI_SIMULATION
   // The submitted credentials can't work in the simulator; stay on the Wokwi network
   WiFi.begin(WOKWI_SSID, "", WOKWI_CHANNEL);
@@ -440,7 +442,6 @@ String readFromEeprom(int startingAddress, int size) {
     }
     result = result + currentChar;
   }
-  PRINTLN(result);
   return result;
 }
 
