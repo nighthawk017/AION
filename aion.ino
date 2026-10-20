@@ -98,6 +98,13 @@ time_t currentTime;
 long int eventTime = 1632528000;
 //number of days remaining until the target event
 long int daysRemaining = 0;
+//false until daysRemaining has been computed in the current countdown (reset on every connect)
+bool daysRemainingValid = false;
+//millis() of the last daysRemaining update, and the interval between updates
+unsigned long daysRemainingUpdatedAt = 0;
+const unsigned long DAYS_UPDATE_INTERVAL = 10000;
+//time(nullptr) stays near 1970 until NTP has synced; any later time means the clock is set (2020-01-01)
+const time_t TIME_SYNCED_AFTER = 1577836800;
 
 //internal state
 int state = 0;
@@ -160,11 +167,20 @@ void loop() {
   unsigned long numberOfMilis = millis();
   
   if (state == 1) {
-    if ((numberOfMilis % 10000) < 5) {
-      updateRemainingDays();      
-      PRINTLN("Updated remaining days");
+    // before NTP has synced the computed days would be based on 1970
+    if (time(nullptr) < TIME_SYNCED_AFTER) {
+      displayText("Syncing time...");
     }
-    displayNumber(daysRemaining);    
+    else {
+      // compute right away after connecting, then every DAYS_UPDATE_INTERVAL
+      if (!daysRemainingValid || numberOfMilis - daysRemainingUpdatedAt >= DAYS_UPDATE_INTERVAL) {
+        updateRemainingDays();
+        daysRemainingValid = true;
+        daysRemainingUpdatedAt = numberOfMilis;
+        PRINTLN("Updated remaining days");
+      }
+      displayNumber(daysRemaining);
+    }
   }
 
   else {
@@ -365,6 +381,7 @@ int connectToWifi() {
     }    
   }
   state = 1;
+  daysRemainingValid = false;
   return 0;
 }
 
@@ -427,10 +444,19 @@ String readFromEeprom(int startingAddress, int size) {
 
 //************************ LED Matrix ************************
 
-void displayNumber(int number) {
-  if (P.displayAnimate()) // animates and returns true when an animation is completed
+//true while screenText holds the number last passed to displayNumber() (displayedNumber)
+bool numberDisplayed = false;
+long int displayedNumber = 0;
+
+//shows the number without scrolling. It replaces the current content right away when the number changed
+//or text is shown, instead of waiting for the current animation (or the 60 s pause) to finish
+void displayNumber(long int number) {
+  bool animationFinished = P.displayAnimate(); // animates and returns true when an animation is completed
+  if (animationFinished || !numberDisplayed || number != displayedNumber)
   {
-      sprintf(screenText, "%d", number); 
+      numberDisplayed = true;
+      displayedNumber = number;
+      sprintf(screenText, "%ld", number); 
       // Set the display for the next string. 
       P.setTextBuffer(screenText);
       // When we have gone back to the first string, set a new exit effect
@@ -446,12 +472,15 @@ void displayNumber(int number) {
 void displayText(const char* text) {
   if (P.displayAnimate()) // animates and returns true when an animation is completed
   {
+      numberDisplayed = false;
       sprintf(screenText, "%s", text); 
       // Set the display for the next string. 
       P.setTextBuffer(screenText);
       // When we have gone back to the first string, set a new exit effect
       // and when we have done all those set a new entry effect.
       P.setTextEffect(effect, effect);
+      // displayNumber() sets a 60 s pause
+      P.setPause(PAUSE_TIME);
       // Tell Parola we have a new animation
       P.displayReset();
   }  
