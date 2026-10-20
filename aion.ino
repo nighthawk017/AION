@@ -88,8 +88,14 @@ long int eventTime = 1632528000;
 //number of days remaining until the target event
 long int daysRemaining = 0;
 
-//internal state 
+//internal state
 int state = 0;
+
+//set by the /save handler; loop() connects to wifi once the http response had time to reach the browser
+bool connectRequested = false;
+unsigned long connectRequestedAt = 0;
+//delay in ms between saving and switching off the access point to connect to wifi
+const unsigned long CONNECT_REQUEST_DELAY = 1000;
 
 
 
@@ -153,7 +159,14 @@ void loop() {
     else {
       displayText("Connect to DATE TIMER WiFi access point, then access 192.168.4.4 in your browser.");
     }
-    if (state == 0 && ((numberOfMilis) > STARTUP_TIMEOUT)) {
+    if (connectRequested) {
+      if (numberOfMilis - connectRequestedAt > CONNECT_REQUEST_DELAY) {
+        connectRequested = false;
+        // connectToWifi() sets the state to 1 on success and 2 on failure
+        connectToWifi();
+      }
+    }
+    else if (state == 0 && ((numberOfMilis) > STARTUP_TIMEOUT)) {
       PRINTLN(ssid);
       PRINTLN(password);
       if(ssid != SSID_DEFAULT_VALUE || password != PASSWORD_DEFAULT_VALUE ) {
@@ -245,7 +258,7 @@ void handleRoot() {
           var eventTime = document.getElementById('target-date').valueAsNumber / 1000;\
           fetch('/save?ssid=' + ssid + '&password=' + password + '&eventTime=' + eventTime) \
             .then(response => { \
-              if(response.status === 200) alert(\"success\"); \
+              if(response.status === 200) response.text().then(text => alert(text)); \
               else alert(\"failed\");}); \
         };\
       </script>\
@@ -256,7 +269,8 @@ void handleRoot() {
 }
 
 // The handler used to process the form input proided by the user and save the data to eeprom.
-// After saving the data in eeprom, it tries to connect to wifi
+// It only requests the wifi connection: loop() connects after the response is sent, because
+// connecting shuts down the access point the browser is using
 void handleSave() {
   if (server.arg("ssid") != "") {
     PRINTLN("ssid: " + server.arg("ssid"));
@@ -276,9 +290,10 @@ void handleSave() {
     writeToEeprom(2*MAX_FIELD_LENGTH, server.arg("eventTime"));
     eventTime = strtol(buf , &eptr, 10);
   }
-  server.send(200);
-  delay(100);
-  connectToWifi();
+  server.send(200, "text/plain", "Saved. AION is now connecting to the WiFi network and this access point will close. "
+    "On success the LED matrix shows the days remaining. On failure it shows an error and the DATE_TIMER access point comes back so you can resubmit.");
+  connectRequested = true;
+  connectRequestedAt = millis();
 }
 
 void checkConnection() {
