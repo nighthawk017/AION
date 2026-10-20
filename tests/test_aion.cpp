@@ -372,6 +372,118 @@ static void test_save_does_not_block_on_wifi() {
     ASSERT_TRUE(connectRequested);
 }
 
+// ---------- state machine ----------
+
+// a board that was configured before and has just restarted
+static void bootWithSavedConfig() {
+    ssid = "home";
+    password = "pass1234";
+    eventTime = utc(2026, 6, 25);
+    saveConfig();
+    ssid = SSID_DEFAULT_VALUE;
+    password = PASSWORD_DEFAULT_VALUE;
+    setup();
+}
+
+static void test_state_no_config_stays_in_config_mode() {
+    setup();
+    g_millis = STARTUP_TIMEOUT + 1;
+    loop();
+    ASSERT_EQ(state, CONFIG);
+    ASSERT_EQ(WiFi.begins, 0);
+    ASSERT_CONTAINS(P.shown(), "Connect to DATE TIMER");
+}
+
+static void test_state_saved_config_waits_for_startup_timeout() {
+    bootWithSavedConfig();
+    g_millis = STARTUP_TIMEOUT;
+    loop();
+    ASSERT_EQ(state, CONFIG);
+    ASSERT_EQ(WiFi.begins, 0);
+}
+
+static void test_state_saved_config_connects_and_counts_down() {
+    bootWithSavedConfig();
+    g_now = utc(2026, 6, 15, 10);
+    g_millis = STARTUP_TIMEOUT + 1;
+    loop();
+    ASSERT_EQ(state, COUNTDOWN);
+    ASSERT_EQ(WiFi.lastMode, WIFI_STA);
+    ASSERT_STR_EQ(WiFi.beganSsid, "home");
+    ASSERT_STR_EQ(WiFi.beganPassword, "pass1234");
+    loop();
+    ASSERT_STR_EQ(P.shown(), "10");
+}
+
+static void test_state_connect_failure_restarts_access_point() {
+    bootWithSavedConfig();
+    WiFi.beginResult = WL_DISCONNECTED;
+    g_millis = STARTUP_TIMEOUT + 1;
+    loop();
+    ASSERT_EQ(state, CONNECT_FAILED);
+    ASSERT_EQ(WiFi.disconnects, 1);
+    ASSERT_EQ(WiFi.lastMode, WIFI_AP);
+    ASSERT_EQ(WiFi.softAPs, 2);
+    loop();
+    ASSERT_CONTAINS(P.shown(), "Incorrect wifi credentials");
+    // no automatic retry
+    g_millis += STARTUP_TIMEOUT;
+    loop();
+    ASSERT_EQ(WiFi.begins, 1);
+}
+
+static void test_state_save_connects_after_the_reply_was_sent() {
+    setup();
+    g_millis = 1000;
+    server.args = {{"ssid", "home"}, {"password", "pass1234"}};
+    handleSave();
+    g_millis += CONNECT_REQUEST_DELAY;
+    loop();
+    ASSERT_EQ(WiFi.begins, 0);
+    g_millis += 1;
+    loop();
+    ASSERT_EQ(WiFi.begins, 1);
+    ASSERT_EQ(state, COUNTDOWN);
+    ASSERT_FALSE(connectRequested);
+}
+
+static void test_state_resubmit_after_failure() {
+    setup();
+    WiFi.beginResult = WL_DISCONNECTED;
+    server.args = {{"ssid", "home"}, {"password", "wrong"}};
+    handleSave();
+    g_millis += CONNECT_REQUEST_DELAY + 1;
+    loop();
+    ASSERT_EQ(state, CONNECT_FAILED);
+
+    WiFi.beginResult = WL_CONNECTED;
+    server.args = {{"password", "pass1234"}};
+    handleSave();
+    g_millis += CONNECT_REQUEST_DELAY + 1;
+    loop();
+    ASSERT_EQ(state, COUNTDOWN);
+    ASSERT_STR_EQ(WiFi.beganSsid, "home");
+    ASSERT_STR_EQ(WiFi.beganPassword, "pass1234");
+}
+
+static void test_state_countdown_reconnects_when_wifi_drops() {
+    bootWithSavedConfig();
+    g_now = utc(2026, 6, 15, 10);
+    g_millis = STARTUP_TIMEOUT + 1;
+    loop();
+    ASSERT_EQ(state, COUNTDOWN);
+    WiFi.currentStatus = WL_DISCONNECTED;
+    g_millis += CONNECTION_CHECK_INTERVAL - 1;
+    loop();
+    ASSERT_EQ(WiFi.reconnects, 0);
+    g_millis += 1;
+    loop();
+    ASSERT_EQ(WiFi.reconnects, 1);
+    // the countdown keeps running from the system clock meanwhile
+    ASSERT_EQ(state, COUNTDOWN);
+    ASSERT_STR_EQ(P.shown(), "10");
+}
+
 int main() {
     printf("harness\n");
     RUN(test_setup_starts_access_point_in_config_mode);
@@ -408,6 +520,15 @@ int main() {
     RUN(test_save_page_urlencodes_the_form);
     RUN(test_save_too_long_values_are_rejected);
     RUN(test_save_does_not_block_on_wifi);
+
+    printf("state machine\n");
+    RUN(test_state_no_config_stays_in_config_mode);
+    RUN(test_state_saved_config_waits_for_startup_timeout);
+    RUN(test_state_saved_config_connects_and_counts_down);
+    RUN(test_state_connect_failure_restarts_access_point);
+    RUN(test_state_save_connects_after_the_reply_was_sent);
+    RUN(test_state_resubmit_after_failure);
+    RUN(test_state_countdown_reconnects_when_wifi_drops);
 
     printf("\n%d tests, %d failures\n", g_tests_run, g_tests_failed);
     return g_tests_failed == 0 ? 0 : 1;
