@@ -146,20 +146,24 @@ void loop() {
 
   else {
     server.handleClient();
-    displayText("Connect to DATE TIMER WiFi access point, then access 192.168.4.4 in your browser.");
+    // state 2: the last connection attempt failed and the access point was restarted
+    if (state == 2) {
+      displayText("Incorrect wifi credentials. Connect to DATE TIMER WiFi access point, then access 192.168.4.4 to resubmit.");
+    }
+    else {
+      displayText("Connect to DATE TIMER WiFi access point, then access 192.168.4.4 in your browser.");
+    }
     if (state == 0 && ((numberOfMilis) > STARTUP_TIMEOUT)) {
       PRINTLN(ssid);
       PRINTLN(password);
       if(ssid != SSID_DEFAULT_VALUE || password != PASSWORD_DEFAULT_VALUE ) {
+        // connectToWifi() sets the state to 1 on success and 2 on failure
         if(connectToWifi() == 0) {
           PRINTLN("Automatic wifi connection successful.");
-          state = 1;
         }
-          
         else {
-          state = 2;
           PRINTLN("Automatic wifi connection unsuccessful.");
-        }         
+        }
       }
       //TODO implement if ssid or password are changed then connect to wifi and change state to 1 (maybe if wifi connection fails retry in another 3 minutes)
     }
@@ -281,7 +285,8 @@ void checkConnection() {
   //TODO check if connection to wifi is established, if not, return to AP state to update logic
 }
 
-//connects to wifi and changes the internal state to 1 (display counter to target date)
+//connects to wifi and changes the internal state to 1 (display counter to target date).
+//On failure it restarts the access point so the config page is reachable again, and changes the state to 2
 int connectToWifi() {
   int retriesCount = 0;
   WiFi.mode(WIFI_STA);
@@ -297,7 +302,10 @@ int connectToWifi() {
   while (WiFi.status() != WL_CONNECTED) {
     if (retriesCount > 100) {
       PRINTLN("Check wifi credentials");
-      displayText("Incorrect wifi credentials. Please resubmit wifi credentials.");
+      // stop the station from retrying in the background, then bring the access point back
+      WiFi.disconnect();
+      initAccessPoint();
+      state = 2;
       return 1;
     }
     else {
@@ -372,7 +380,7 @@ void displayNumber(int number) {
   
 }
 
-void displayText(char* text) {
+void displayText(const char* text) {
   if (P.displayAnimate()) // animates and returns true when an animation is completed
   {
       sprintf(screenText, "%s", text); 
