@@ -94,6 +94,10 @@ const byte CONFIG_MARKER = 0xA1;
 
 time_t currentTime;
 
+//local timezone as a POSIX TZ string (DST-aware), used to decide when a new day starts.
+//Central European Time; e.g. "EET-2EEST,M3.5.0/3,M10.5.0/4" for Eastern Europe or "GMT0BST,M3.5.0/1,M10.5.0" for the UK
+const char* TIMEZONE = "CET-1CEST,M3.5.0,M10.5.0/3";
+
 //when the target event takes place (it can be programmed when connecting to the board via wifi)
 long int eventTime = 1632528000;
 //number of days remaining until the target event
@@ -129,7 +133,7 @@ void setup() {
   initWebServer();
   
   //configure time
-  configTime(3600, 0, "pool.ntp.org", "time.nist.gov");
+  configTzTime(TIMEZONE, "pool.ntp.org", "time.nist.gov");
 
   //Initialize EEPROM and read the saved data from eeprom
   EEPROM.begin(EEPROM_SIZE);
@@ -491,11 +495,30 @@ void displayText(const char* text) {
 
 //************************ Timer Logic ************************
 
+//number of days from 1970-01-01 to the given calendar date (month 1-12), for any year
+//(H. Hinnant's days_from_civil). Lets two dates be compared without time of day or timezone getting in the way
+long int daysFromCivil(int year, int month, int day) {
+  year -= month <= 2;
+  long int era = (year >= 0 ? year : year - 399) / 400;
+  long int yearOfEra = year - era * 400;
+  long int dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+  long int dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+  return era * 146097 + dayOfEra - 719468;
+}
+
+//days remaining = target date - today's local date, counted in calendar days:
+//target tomorrow -> 1, today -> 0, yesterday -> -1. The count changes at local midnight
 void updateRemainingDays() {
   currentTime = time(nullptr);
-  long int timeRemaining = eventTime - currentTime;
-  long int hoursRemaining = timeRemaining / 3600;
-  daysRemaining = hoursRemaining / 24;
+  struct tm now;
+  localtime_r(&currentTime, &now);
+  long int today = daysFromCivil(now.tm_year + 1900, now.tm_mon + 1, now.tm_mday);
+  // the date picker sends UTC midnight of the chosen date, so the target date is eventTime's UTC date
+  time_t eventTimestamp = eventTime;
+  struct tm event;
+  gmtime_r(&eventTimestamp, &event);
+  long int eventDay = daysFromCivil(event.tm_year + 1900, event.tm_mon + 1, event.tm_mday);
+  daysRemaining = eventDay - today;
   PRINTLN(ctime(&currentTime));
   PRINTLN(daysRemaining);
 }
