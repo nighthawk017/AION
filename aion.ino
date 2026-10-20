@@ -78,8 +78,15 @@ char htmlResponse[3000];
 //timeout time before the board tries to automatically connect to wifi (using the data saved in eeprom)
 const unsigned long STARTUP_TIMEOUT = 180000;
 
-//field length in bytes for eeprom data
-const int MAX_FIELD_LENGTH = 32;
+//eeprom layout: each value is stored as a null-terminated string in a fixed slot, so a slot
+//holds at most SIZE - 1 characters. The sizes follow the WiFi limits (SSID 32 bytes, WPA2 password 63 characters)
+const int EEPROM_SIZE = 512;
+const int SSID_ADDR = 0;
+const int SSID_SIZE = 33;
+const int PASSWORD_ADDR = SSID_ADDR + SSID_SIZE;
+const int PASSWORD_SIZE = 64;
+const int EVENT_TIME_ADDR = PASSWORD_ADDR + PASSWORD_SIZE;
+const int EVENT_TIME_SIZE = 32;
 
 time_t currentTime;
 
@@ -114,19 +121,19 @@ void setup() {
   configTime(3600, 0, "pool.ntp.org", "time.nist.gov");
 
   //Initialize EEPROM and read the saved data from eeprom
-  EEPROM.begin(512);  
+  EEPROM.begin(EEPROM_SIZE);
   delay(10);
-  ssid = readFromEeprom(0);
+  ssid = readFromEeprom(SSID_ADDR, SSID_SIZE);
   PRINT("EEPROM ssid value: ");
   PRINTLN(ssid);
 
-  password = readFromEeprom(1);
+  password = readFromEeprom(PASSWORD_ADDR, PASSWORD_SIZE);
   PRINT("EEPROM password value: ");
   PRINTLN(password);
 
-  char buf[32];
+  char buf[EVENT_TIME_SIZE];
   char *eptr;
-  readFromEeprom(2).toCharArray(buf, 32);
+  readFromEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE).toCharArray(buf, EVENT_TIME_SIZE);
   eventTime = strtol(buf , &eptr, 10);
   
   PRINTLN("EEPROM eventvalue value: ");
@@ -285,20 +292,29 @@ void handleSave() {
       return;
     }
   }
+  //values that do not fit their eeprom slot used to be skipped silently while the page reported success
+  if (server.arg("ssid").length() >= SSID_SIZE) {
+    server.send(400, "text/plain", "The WiFi name is too long (max " + String(SSID_SIZE - 1) + " bytes), nothing was saved.");
+    return;
+  }
+  if (server.arg("password").length() >= PASSWORD_SIZE) {
+    server.send(400, "text/plain", "The WiFi password is too long (max " + String(PASSWORD_SIZE - 1) + " characters), nothing was saved.");
+    return;
+  }
 
   if (server.arg("ssid") != "") {
     PRINTLN("ssid: " + server.arg("ssid"));
-    writeToEeprom(0, server.arg("ssid"));
+    writeToEeprom(SSID_ADDR, SSID_SIZE, server.arg("ssid"));
     ssid = server.arg("ssid");
   }
   if (server.arg("password") != "") {
     PRINTLN("password: " + server.arg("password"));
     password = server.arg("password");
-    writeToEeprom(MAX_FIELD_LENGTH, server.arg("password"));
+    writeToEeprom(PASSWORD_ADDR, PASSWORD_SIZE, server.arg("password"));
   }
   if (server.arg("eventTime") != "") {
     PRINTLN("eventTime: " + server.arg("eventTime"));
-    writeToEeprom(2*MAX_FIELD_LENGTH, server.arg("eventTime"));
+    writeToEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE, server.arg("eventTime"));
     eventTime = newEventTime;
   }
   server.send(200, "text/plain", "Saved. AION is now connecting to the WiFi network and this access point will close. "
@@ -359,8 +375,10 @@ void disconnectFromWifi() {
 
 //************************ EEPROM ************************
 
-void writeToEeprom(int startingAddress, String value) {
-  if (value.length() < MAX_FIELD_LENGTH) {
+//writes value as a null-terminated string to the slot at startingAddress.
+//Values that do not fit the slot (size - 1 characters) are not written; handleSave() rejects them first
+void writeToEeprom(int startingAddress, int size, String value) {
+  if (value.length() < size) {
     int i;
     for (i = 0; i < value.length(); i++) {
       EEPROM.write(startingAddress + i, value.charAt(i));
@@ -371,10 +389,10 @@ void writeToEeprom(int startingAddress, String value) {
 }
 
 
-String readFromEeprom(int fieldIndex) {
-  int startingAddress = fieldIndex * MAX_FIELD_LENGTH;
+//reads the null-terminated string stored in the slot at startingAddress
+String readFromEeprom(int startingAddress, int size) {
   String result = "";
-  for (int i = 0; i < MAX_FIELD_LENGTH; i++) {
+  for (int i = 0; i < size; i++) {
     char currentChar;
     currentChar = EEPROM.read(startingAddress + i);
     result = result + currentChar;
