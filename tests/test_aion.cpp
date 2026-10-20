@@ -107,10 +107,92 @@ static void test_root_page_is_served() {
     ASSERT_CONTAINS(server.sentBody, "fetch('/save', {method: 'POST'");
 }
 
+// ---------- EEPROM storage ----------
+
+static void test_eeprom_slots_round_trip() {
+    writeToEeprom(SSID_ADDR, SSID_SIZE, "home-network");
+    writeToEeprom(PASSWORD_ADDR, PASSWORD_SIZE, "s3cret pass");
+    writeToEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE, "1767225600");
+    String readSsid = readFromEeprom(SSID_ADDR, SSID_SIZE);
+    // the length catches a NUL terminator kept in the String
+    ASSERT_EQ(readSsid.length(), 12);
+    ASSERT_STR_EQ(readSsid.c_str(), "home-network");
+    ASSERT_STR_EQ(readFromEeprom(PASSWORD_ADDR, PASSWORD_SIZE).c_str(), "s3cret pass");
+    ASSERT_STR_EQ(readFromEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE).c_str(), "1767225600");
+}
+
+static void test_eeprom_value_filling_the_slot_round_trips() {
+    std::string longest(PASSWORD_SIZE - 1, 'p');
+    writeToEeprom(PASSWORD_ADDR, PASSWORD_SIZE, longest.c_str());
+    ASSERT_STR_EQ(readFromEeprom(PASSWORD_ADDR, PASSWORD_SIZE).c_str(), longest);
+}
+
+static void test_eeprom_read_matches_default_credentials() {
+    writeToEeprom(SSID_ADDR, SSID_SIZE, SSID_DEFAULT_VALUE);
+    ASSERT_TRUE(readFromEeprom(SSID_ADDR, SSID_SIZE) == SSID_DEFAULT_VALUE);
+}
+
+static void test_eeprom_too_long_value_is_not_written() {
+    writeToEeprom(SSID_ADDR, SSID_SIZE, "old-ssid");
+    writeToEeprom(PASSWORD_ADDR, PASSWORD_SIZE, "neighbour");
+    std::string tooLong(SSID_SIZE, 's');
+    writeToEeprom(SSID_ADDR, SSID_SIZE, tooLong.c_str());
+    ASSERT_STR_EQ(readFromEeprom(SSID_ADDR, SSID_SIZE).c_str(), "old-ssid");
+    ASSERT_STR_EQ(readFromEeprom(PASSWORD_ADDR, PASSWORD_SIZE).c_str(), "neighbour");
+}
+
+static void test_eeprom_save_config_commits_once_and_sets_marker() {
+    ssid = "home";
+    password = "pass";
+    eventTime = 1767225600;
+    saveConfig();
+    ASSERT_EQ(EEPROM.commits, 1);
+    ASSERT_EQ(EEPROM.read(CONFIG_MARKER_ADDR), CONFIG_MARKER);
+}
+
+static void test_eeprom_saved_config_is_loaded_on_boot() {
+    ssid = "home";
+    password = "pass";
+    eventTime = 1767225600;
+    saveConfig();
+    ssid = SSID_DEFAULT_VALUE;
+    password = PASSWORD_DEFAULT_VALUE;
+    eventTime = 0;
+    setup();
+    ASSERT_STR_EQ(ssid.c_str(), "home");
+    ASSERT_STR_EQ(password.c_str(), "pass");
+    ASSERT_EQ(eventTime, 1767225600);
+}
+
+static void test_eeprom_blank_reads_as_not_configured() {
+    // erased flash is all 0xFF, which used to be read back as 33/64 bytes of 0xFF credentials
+    setup();
+    ASSERT_TRUE(ssid == SSID_DEFAULT_VALUE);
+    ASSERT_TRUE(password == PASSWORD_DEFAULT_VALUE);
+    ASSERT_EQ(eventTime, 1632528000);
+}
+
+static void test_eeprom_data_without_marker_is_ignored() {
+    // a layout from before the marker existed
+    writeToEeprom(SSID_ADDR, SSID_SIZE, "old-layout");
+    setup();
+    ASSERT_TRUE(ssid == SSID_DEFAULT_VALUE);
+}
+
 int main() {
     printf("harness\n");
     RUN(test_setup_starts_access_point_in_config_mode);
     RUN(test_root_page_is_served);
+
+    printf("EEPROM storage\n");
+    RUN(test_eeprom_slots_round_trip);
+    RUN(test_eeprom_value_filling_the_slot_round_trips);
+    RUN(test_eeprom_read_matches_default_credentials);
+    RUN(test_eeprom_too_long_value_is_not_written);
+    RUN(test_eeprom_save_config_commits_once_and_sets_marker);
+    RUN(test_eeprom_saved_config_is_loaded_on_boot);
+    RUN(test_eeprom_blank_reads_as_not_configured);
+    RUN(test_eeprom_data_without_marker_is_ignored);
 
     printf("\n%d tests, %d failures\n", g_tests_run, g_tests_failed);
     return g_tests_failed == 0 ? 0 : 1;
