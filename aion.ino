@@ -135,7 +135,10 @@ void setup() {
   //set up serial 
   Serial.begin(115200);
   delay(10);
+  // the wifi core's own debug output is as noisy as the sketch's, so it follows the same flag
+#if DEBUG
   Serial.setDebugOutput(true);
+#endif
 
   //initialize webserver
   initAccessPoint();
