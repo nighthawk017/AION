@@ -255,9 +255,9 @@ void handleRoot() {
         function handleSaveClick(){\
           ssid = document.getElementById('ssid').value;\
           var password = document.getElementById('password').value;\
-          var url = '/save?ssid=' + ssid + '&password=' + password;\
+          var url = '/save?ssid=' + encodeURIComponent(ssid) + '&password=' + encodeURIComponent(password);\
           var targetDate = document.getElementById('target-date').valueAsNumber;\
-          if (!isNaN(targetDate)) url += '&eventTime=' + targetDate / 1000;\
+          if (!isNaN(targetDate)) url += '&eventTime=' + encodeURIComponent(targetDate / 1000);\
           fetch(url) \
             .then(response => response.text().then(text => alert(text))) \
             .catch(() => alert(\"failed\")); \
