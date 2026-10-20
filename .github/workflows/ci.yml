@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the host tests
+        run: make -C tests test
+
+  compile:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the real board
+          - fqbn: esp8266:esp8266:nodemcuv2
+            core: esp8266:esp8266
+            index: https://arduino.esp8266.com/stable/package_esp8266com_index.json
+          # the Wokwi simulation build
+          - fqbn: esp32:esp32:esp32
+            core: esp32:esp32
+            index: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install the core and libraries
+        run: |
+          arduino-cli core update-index --additional-urls ${{ matrix.index }}
+          arduino-cli core install ${{ matrix.core }} --additional-urls ${{ matrix.index }}
+          arduino-cli lib install MD_Parola MD_MAX72XX
+      - name: Compile
+        # arduino-cli needs the sketch folder to match the sketch name (aion.ino in AION/)
+        run: |
+          mkdir -p build/sketch/aion && ln -sf ../../../aion.ino build/sketch/aion/aion.ino
+          arduino-cli compile --fqbn ${{ matrix.fqbn }} --additional-urls ${{ matrix.index }} build/sketch/aion
