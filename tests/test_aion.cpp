@@ -270,6 +270,108 @@ static void test_days_recomputed_every_update_interval() {
     ASSERT_STR_EQ(P.shown(), "0");
 }
 
+// ---------- /save handler ----------
+
+static void test_save_stores_and_applies_all_fields() {
+    server.args = {{"ssid", "home"}, {"password", "pass1234"}, {"eventTime", "1767225600"}};
+    handleSave();
+    ASSERT_EQ(server.sentStatus, 200);
+    ASSERT_STR_EQ(ssid.c_str(), "home");
+    ASSERT_STR_EQ(password.c_str(), "pass1234");
+    ASSERT_EQ(eventTime, 1767225600);
+    ASSERT_STR_EQ(readFromEeprom(SSID_ADDR, SSID_SIZE).c_str(), "home");
+    ASSERT_STR_EQ(readFromEeprom(PASSWORD_ADDR, PASSWORD_SIZE).c_str(), "pass1234");
+    ASSERT_STR_EQ(readFromEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE).c_str(), "1767225600");
+    ASSERT_EQ(EEPROM.read(CONFIG_MARKER_ADDR), CONFIG_MARKER);
+}
+
+static void test_save_empty_fields_keep_current_values() {
+    ssid = "home";
+    password = "pass1234";
+    eventTime = 1767225600;
+    server.args = {{"ssid", ""}, {"password", ""}, {"eventTime", ""}};
+    handleSave();
+    ASSERT_EQ(server.sentStatus, 200);
+    ASSERT_STR_EQ(ssid.c_str(), "home");
+    ASSERT_STR_EQ(password.c_str(), "pass1234");
+    ASSERT_EQ(eventTime, 1767225600);
+}
+
+static void test_save_missing_event_time_keeps_stored_date() {
+    eventTime = 1767225600;
+    server.args = {{"ssid", "home"}, {"password", "pass1234"}};
+    handleSave();
+    ASSERT_EQ(server.sentStatus, 200);
+    ASSERT_EQ(eventTime, 1767225600);
+}
+
+static void test_save_nan_event_time_is_rejected() {
+    // an empty date picker used to send "NaN", stored as 1970
+    eventTime = 1767225600;
+    server.args = {{"ssid", "home"}, {"eventTime", "NaN"}};
+    handleSave();
+    ASSERT_EQ(server.sentStatus, 400);
+    ASSERT_EQ(eventTime, 1767225600);
+    ASSERT_TRUE(ssid == SSID_DEFAULT_VALUE);
+    ASSERT_EQ(EEPROM.commits, 0);
+    ASSERT_FALSE(connectRequested);
+}
+
+static void test_save_out_of_range_event_time_is_rejected() {
+    const char* invalid[] = {"0", "-86400", "253402300800", "1767225600abc", "1.5"};
+    for (const char* value : invalid) {
+        server.args = {{"eventTime", value}};
+        handleSave();
+        ASSERT_EQ(server.sentStatus, 400);
+    }
+    ASSERT_EQ(EEPROM.commits, 0);
+}
+
+static void test_save_special_character_password_stored_unchanged() {
+    // the page urlencodes the body; the server hands the decoded value to the handler
+    const char* special = "p&ss=w0rd+%20 #?\"'<>";
+    server.args = {{"ssid", "home"}, {"password", special}};
+    handleSave();
+    ASSERT_EQ(server.sentStatus, 200);
+    ASSERT_STR_EQ(password.c_str(), special);
+    ASSERT_STR_EQ(readFromEeprom(PASSWORD_ADDR, PASSWORD_SIZE).c_str(), special);
+}
+
+static void test_save_page_urlencodes_the_form() {
+    // building the body by string concatenation broke passwords containing & or =
+    handleRoot();
+    ASSERT_CONTAINS(server.sentBody, "new URLSearchParams(");
+    ASSERT_CONTAINS(server.sentBody, "body: body");
+}
+
+static void test_save_too_long_values_are_rejected() {
+    server.args = {{"ssid", std::string(SSID_SIZE, 's')}, {"password", "pass1234"}};
+    handleSave();
+    ASSERT_EQ(server.sentStatus, 400);
+    ASSERT_CONTAINS(server.sentBody, "max 32 bytes");
+
+    server.args = {{"ssid", "home"}, {"password", std::string(PASSWORD_SIZE, 'p')}};
+    handleSave();
+    ASSERT_EQ(server.sentStatus, 400);
+    ASSERT_CONTAINS(server.sentBody, "max 63 characters");
+
+    ASSERT_TRUE(ssid == SSID_DEFAULT_VALUE);
+    ASSERT_TRUE(password == PASSWORD_DEFAULT_VALUE);
+    ASSERT_EQ(EEPROM.commits, 0);
+}
+
+static void test_save_does_not_block_on_wifi() {
+    g_millis = 5000;
+    server.args = {{"ssid", "home"}, {"password", "pass1234"}};
+    handleSave();
+    // replies right away and leaves the connecting to loop()
+    ASSERT_EQ(server.sentStatus, 200);
+    ASSERT_EQ(g_millis, 5000);
+    ASSERT_EQ(WiFi.begins, 0);
+    ASSERT_EQ(state, CONFIG);
+    ASSERT_TRUE(connectRequested);
+}
+
 int main() {
     printf("harness\n");
     RUN(test_setup_starts_access_point_in_config_mode);
@@ -295,6 +397,17 @@ int main() {
     RUN(test_days_across_autumn_dst_change);
     RUN(test_days_syncing_until_ntp_sets_the_clock);
     RUN(test_days_recomputed_every_update_interval);
+
+    printf("/save handler\n");
+    RUN(test_save_stores_and_applies_all_fields);
+    RUN(test_save_empty_fields_keep_current_values);
+    RUN(test_save_missing_event_time_keeps_stored_date);
+    RUN(test_save_nan_event_time_is_rejected);
+    RUN(test_save_out_of_range_event_time_is_rejected);
+    RUN(test_save_special_character_password_stored_unchanged);
+    RUN(test_save_page_urlencodes_the_form);
+    RUN(test_save_too_long_values_are_rejected);
+    RUN(test_save_does_not_block_on_wifi);
 
     printf("\n%d tests, %d failures\n", g_tests_run, g_tests_failed);
     return g_tests_failed == 0 ? 0 : 1;
