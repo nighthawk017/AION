@@ -87,6 +87,10 @@ const int PASSWORD_ADDR = SSID_ADDR + SSID_SIZE;
 const int PASSWORD_SIZE = 64;
 const int EVENT_TIME_ADDR = PASSWORD_ADDR + PASSWORD_SIZE;
 const int EVENT_TIME_SIZE = 32;
+//written after the values on every save. Blank eeprom (all 0xFF) or data from an older layout has no marker
+//and is treated as "not configured"; change the marker value whenever the layout changes
+const int CONFIG_MARKER_ADDR = EVENT_TIME_ADDR + EVENT_TIME_SIZE;
+const byte CONFIG_MARKER = 0xA1;
 
 time_t currentTime;
 
@@ -123,21 +127,27 @@ void setup() {
   //Initialize EEPROM and read the saved data from eeprom
   EEPROM.begin(EEPROM_SIZE);
   delay(10);
-  ssid = readFromEeprom(SSID_ADDR, SSID_SIZE);
-  PRINT("EEPROM ssid value: ");
-  PRINTLN(ssid);
+  //without the marker the defaults are kept, so the credentials stay at their default values and the board never auto-connects
+  if (EEPROM.read(CONFIG_MARKER_ADDR) == CONFIG_MARKER) {
+    ssid = readFromEeprom(SSID_ADDR, SSID_SIZE);
+    PRINT("EEPROM ssid value: ");
+    PRINTLN(ssid);
 
-  password = readFromEeprom(PASSWORD_ADDR, PASSWORD_SIZE);
-  PRINT("EEPROM password value: ");
-  PRINTLN(password);
+    password = readFromEeprom(PASSWORD_ADDR, PASSWORD_SIZE);
+    PRINT("EEPROM password value: ");
+    PRINTLN(password);
 
-  char buf[EVENT_TIME_SIZE];
-  char *eptr;
-  readFromEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE).toCharArray(buf, EVENT_TIME_SIZE);
-  eventTime = strtol(buf , &eptr, 10);
-  
-  PRINTLN("EEPROM eventvalue value: ");
-  PRINTLN(eventTime);
+    char buf[EVENT_TIME_SIZE];
+    char *eptr;
+    readFromEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE).toCharArray(buf, EVENT_TIME_SIZE);
+    eventTime = strtol(buf , &eptr, 10);
+
+    PRINTLN("EEPROM eventvalue value: ");
+    PRINTLN(eventTime);
+  }
+  else {
+    PRINTLN("EEPROM holds no saved configuration");
+  }
   
   // initialize and display start text on led matrix
   P.begin();
@@ -304,19 +314,17 @@ void handleSave() {
 
   if (server.arg("ssid") != "") {
     PRINTLN("ssid: " + server.arg("ssid"));
-    writeToEeprom(SSID_ADDR, SSID_SIZE, server.arg("ssid"));
     ssid = server.arg("ssid");
   }
   if (server.arg("password") != "") {
     PRINTLN("password: " + server.arg("password"));
     password = server.arg("password");
-    writeToEeprom(PASSWORD_ADDR, PASSWORD_SIZE, server.arg("password"));
   }
   if (server.arg("eventTime") != "") {
     PRINTLN("eventTime: " + server.arg("eventTime"));
-    writeToEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE, server.arg("eventTime"));
     eventTime = newEventTime;
   }
+  saveConfig();
   server.send(200, "text/plain", "Saved. AION is now connecting to the WiFi network and this access point will close. "
     "On success the LED matrix shows the days remaining. On failure it shows an error and the DATE_TIMER access point comes back so you can resubmit.");
   connectRequested = true;
@@ -375,7 +383,17 @@ void disconnectFromWifi() {
 
 //************************ EEPROM ************************
 
-//writes value as a null-terminated string to the slot at startingAddress.
+//writes every value, including the ones that were not changed, so all slots hold valid strings
+//once the marker is set. The marker is written last so an interrupted first save leaves the board unconfigured
+void saveConfig() {
+  writeToEeprom(SSID_ADDR, SSID_SIZE, ssid);
+  writeToEeprom(PASSWORD_ADDR, PASSWORD_SIZE, password);
+  writeToEeprom(EVENT_TIME_ADDR, EVENT_TIME_SIZE, String(eventTime));
+  EEPROM.write(CONFIG_MARKER_ADDR, CONFIG_MARKER);
+  EEPROM.commit();
+}
+
+//writes value as a null-terminated string to the slot at startingAddress (call EEPROM.commit() afterwards).
 //Values that do not fit the slot (size - 1 characters) are not written; handleSave() rejects them first
 void writeToEeprom(int startingAddress, int size, String value) {
   if (value.length() < size) {
@@ -383,8 +401,7 @@ void writeToEeprom(int startingAddress, int size, String value) {
     for (i = 0; i < value.length(); i++) {
       EEPROM.write(startingAddress + i, value.charAt(i));
     }
-    EEPROM.write(startingAddress + i, '\0');    
-    EEPROM.commit();
+    EEPROM.write(startingAddress + i, '\0');
   }
 }
 
