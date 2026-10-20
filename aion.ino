@@ -1,6 +1,15 @@
+// ESP32 builds are only used for the Wokwi simulator (Wokwi has no ESP8266); the real board is an ESP8266 NodeMCU
+#if defined(ESP32)
+#define WOKWI_SIMULATION 1
+#include <WiFi.h>
+#include <WebServer.h>
+typedef WebServer ESP8266WebServer;
+#else
+#define WOKWI_SIMULATION 0
 #include <ESP8266WiFi.h>
-#include <time.h>
 #include <ESP8266WebServer.h>
+#endif
+#include <time.h>
 #include <EEPROM.h>
 #include <MD_Parola.h>
 #include <MD_MAX72xx.h>
@@ -12,9 +21,16 @@
 #define MAX_DEVICES 4
 
 // Define pins for the led matrix
+#if WOKWI_SIMULATION
+// ESP32 VSPI default pins
+#define CLK_PIN   18
+#define DATA_PIN  23
+#define CS_PIN    5
+#else
 #define CLK_PIN   D5
 #define DATA_PIN  D7
 #define CS_PIN    D8
+#endif
 
 
 // Hardware SPI connection
@@ -153,6 +169,22 @@ void loop() {
 
 //************************ WebServer ************************
 
+#if WOKWI_SIMULATION
+// Wokwi only offers its open "Wokwi-GUEST" network, so the simulator joins it as a station instead of
+// running an access point. wokwi.toml forwards localhost:8180 to the web server on port 80.
+const char* WOKWI_SSID = "Wokwi-GUEST";
+const int WOKWI_CHANNEL = 6;
+
+void initAccessPoint() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WOKWI_SSID, "", WOKWI_CHANNEL);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(100);
+  }
+  PRINT("Wokwi IP address: ");
+  PRINTLN(WiFi.localIP());
+}
+#else
 //Initializes the board as access point
 void initAccessPoint() {
   PRINTLN("\nSetting AP (Access Point)…");
@@ -172,6 +204,7 @@ void initAccessPoint() {
   // Print ESP8266 Local IP Address
   PRINTLN(WiFi.softAPIP());
 }
+#endif
 
 //initializez webserver, sets the handlers & starts the web server
 void initWebServer() {
@@ -255,7 +288,12 @@ int connectToWifi() {
   PRINTLN("\nConnecting to WiFi");
   PRINTLN(ssid);
   PRINTLN(password);
+#if WOKWI_SIMULATION
+  // The submitted credentials can't work in the simulator; stay on the Wokwi network
+  WiFi.begin(WOKWI_SSID, "", WOKWI_CHANNEL);
+#else
   WiFi.begin(ssid.c_str(), password.c_str());
+#endif
   while (WiFi.status() != WL_CONNECTED) {
     if (retriesCount > 100) {
       PRINTLN("Check wifi credentials");
@@ -275,7 +313,11 @@ int connectToWifi() {
 
 
 void disconnectFromWifi() {
+#if WOKWI_SIMULATION
+  WiFi.mode(WIFI_OFF);
+#else
   WiFi.forceSleepBegin();                  // turn off ESP8266 RF
+#endif
   delay(100);
 }
 

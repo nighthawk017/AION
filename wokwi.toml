@@ -1,0 +1,9 @@
+[wokwi]
+version = 1
+firmware = 'build/esp32.esp32.esp32/aion.ino.bin'
+elf = 'build/esp32.esp32.esp32/aion.ino.elf'
+
+# Config web page: open http://localhost:8180 while the simulation runs
+[[net.forward]]
+from = "localhost:8180"
+to = "target:80"
