@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "author": "AION",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "id": "esp32",
+      "type": "wokwi-esp32-devkit-v1",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "id": "matrix",
+      "type": "wokwi-max7219-matrix",
+      "top": -120,
+      "left": -60,
+      "attrs": { "chain": "4", "layout": "fc16" }
+    }
+  ],
+  "connections": [
+    [ "esp32:TX0", "$serialMonitor:RX", "", [] ],
+    [ "esp32:RX0", "$serialMonitor:TX", "", [] ],
+    [ "esp32:D23", "matrix:DIN", "green", [] ],
+    [ "esp32:D18", "matrix:CLK", "blue", [] ],
+    [ "esp32:D5", "matrix:CS", "orange", [] ],
+    [ "esp32:VIN", "matrix:VCC", "red", [] ],
+    [ "esp32:GND.1", "matrix:GND", "black", [] ]
+  ]
+}
